@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brand Builder OS 3.0</title>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18.2.0/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18.2.0/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Marked für Markdown Parsing -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; background-color: #f8fafc; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        
+        .markdown-content h1, .markdown-content h2 { font-weight: 700; color: #4c1d95; margin-top: 1rem; font-size: 1.1em; }
+        .markdown-content p { margin-bottom: 0.75rem; line-height: 1.6; color: #374151; }
+        .markdown-content ul { list-style-type: disc; padding-left: 1.25rem; }
+        
+        @media print { 
+            .no-print { display: none !important; } 
+            body { background: white; } 
+            .shadow-2xl, .shadow-sm, .shadow-lg { box-shadow: none !important; border: 1px solid #eee; } 
+            .page-break { page-break-before: always; }
+        }
+        
+        :fullscreen { background: white; overflow: auto; padding: 2rem; }
+    </style>
+</head>
+<body class="text-slate-900">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useRef, useEffect, useCallback } = React;
+
+        // --- UTILS & ICONS ---
+        const queryGemini = async (prompt) => {
+            const apiKey = ""; 
+            try {
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ contents: [{ parts: [{ text: prompt }] }] })
+                });
+                const data = await response.json();
+                return data.candidates?.[0]?.content?.parts?.[0]?.text || "Keine Antwort erhalten.";
+            } catch (error) { throw new Error(error.message); }
+        };
+
+        const MarkdownRenderer = ({ content }) => {
+            if (!content) return null;
+            const clean = content.replace(/\\rightarrow/g, '→').replace(/\$\$/g, '').replace(/\$/g, '');
+            const html = window.marked ? window.marked.parse(clean) : clean;
+            return <div className="markdown-content text-sm" dangerouslySetInnerHTML={{ __html: html }} />;
+        };
+
+        const IconBase = ({ children, size = 24, className = "", color = "currentColor", ...props }) => (
+            <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>{children}</svg>
+        );
+
+        const Icons = {
+            TrendingUp: (p) => <IconBase {...p}><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></IconBase>,
+            Fingerprint: (p) => <IconBase {...p}><path d="M2 12C2 6.5 6.5 2 12 2a10 10 0 0 1 8 6"/><path d="M5 15.1a1 1 0 0 0 1.5 1.1l.3-.2a6 6 0 0 1 6.6 0l.3.2a1 1 0 0 0 1.5-1.1a1 1 0 0 0-1.6-.8l-.3-.1a4 4 0 0 0-4.6 0l-.3.1a1 1 0 0 0-1.6.8Z"/><path d="M12 22v-4"/><path d="M16 22v-2"/><path d="M8 22v-1"/></IconBase>,
+            Target: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><circle cx="12" cy="12" r="6"/><circle cx="12" cy="12" r="2"/></IconBase>,
+            GitBranch: (p) => <IconBase {...p}><line x1="6" y1="3" x2="6" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></IconBase>,
+            Users: (p) => <IconBase {...p}><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></IconBase>,
+            MessageSquare: (p) => <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></IconBase>,
+            PenTool: (p) => <IconBase {...p}><path d="m12 19 7-7 3 3-7 7-3-3z"/><path d="m18 13-1.5-7.5L2 2l3.5 14.5L13 18l5-5z"/><path d="m2 2 7.586 7.586"/><circle cx="11" cy="11" r="2"/></IconBase>,
+            Lightbulb: (p) => <IconBase {...p}><path d="M15 14c.2-1 .7-1.7 1.5-2.5 1-1 1.5-2.4 1.5-3.8 0-3.52-2.9-6.3-6.5-6.3A6.5 6.5 0 0 0 5 7.7c0 1.46.5 2.87 1.4 3.82.8.84 1.3 1.54 1.5 2.48"/><path d="M9 18h6"/><path d="M10 22h4"/></IconBase>,
+            CheckCircle2: (p) => <IconBase {...p}><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/><polyline points="22 4 12 14.01 9 11.01"/></IconBase>,
+            Play: (p) => <IconBase {...p}><polygon points="5 3 19 12 5 21 5 3"/></IconBase>,
+            Lock: (p) => <IconBase {...p}><rect x="3" y="11" width="18" height="11" rx="2" ry="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></IconBase>,
+            ArrowRight: (p) => <IconBase {...p}><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></IconBase>,
+            ArrowLeft: (p) => <IconBase {...p}><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></IconBase>,
+            Save: (p) => <IconBase {...p}><path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2z"/><polyline points="17 21 17 13 7 13 7 21"/><polyline points="7 3 7 8 15 8"/></IconBase>,
+            Download: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></IconBase>,
+            Upload: (p) => <IconBase {...p}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></IconBase>,
+            Trash2: (p) => <IconBase {...p}><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></IconBase>,
+            FolderOpen: (p) => <IconBase {...p}><path d="m6 14 1.45-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.55 6a2 2 0 0 1-1.94 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"/></IconBase>,
+            Plus: (p) => <IconBase {...p}><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></IconBase>,
+            X: (p) => <IconBase {...p}><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></IconBase>,
+            Loader2: (p) => <IconBase {...p}><path d="M21 12a9 9 0 1 1-6.219-8.56"/></IconBase>,
+            RefreshCw: (p) => <IconBase {...p}><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></IconBase>,
+            ShieldCheck: (p) => <IconBase {...p}><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/></IconBase>,
+            MessageSquareQuote: (p) => <IconBase {...p}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 12a2 2 0 0 0 2-2V8H8"/><path d="M14 12a2 2 0 0 0 2-2V8h-2"/></IconBase>,
+            Sparkles: (p) => <IconBase {...p}><path d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z"/></IconBase>,
+            Type: (p) => <IconBase {...p}><polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/></IconBase>,
+            MousePointer2: (p) => <IconBase {...p}><path d="m12 6.2 4.1 9.4-2.3.7 2.4 2.4-1.4 1.4-2.4-2.4-.7 2.3-3.6-7.1z"/><path d="M13 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9"/></IconBase>,
+            Share2: (p) => <IconBase {...p}><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></IconBase>,
+            Layers: (p) => <IconBase {...p}><polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/></IconBase>,
+            ShoppingBag: (p) => <IconBase {...p}><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></IconBase>,
+            Box: (p) => <IconBase {...p}><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/><polyline points="3.27 6.96 12 12.01 20.73 6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></IconBase>,
+            Scale: (p) => <IconBase {...p}><path d="m16 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="m2 16 3-8 3 8c-.87.65-1.92 1-3 1s-2.13-.35-3-1Z"/><path d="M7 21h10"/><path d="M12 3v18"/><path d="M3 7h2c2 0 5-1 7-2 2 1 5 2 7 2h2"/></IconBase>,
+            Smile: (p) => <IconBase {...p}><circle cx="12" cy="12" r="10"/><path d="M8 14s1.5 2 4 2 4-2 4-2"/><line x1="9" y1="9" x2="9.01" y2="9"/><line x1="15" y1="9" x2="15.01" y2="9"/></IconBase>,
+            Maximize: (p) => <IconBase {...p}><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></IconBase>,
+            BookOpen: (p) => <IconBase {...p}><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></IconBase>,
+            Sliders: (p) => <IconBase {...p}><line x1="4" y1="21" x2="4" y2="14"/><line x1="4" y1="10" x2="4" y2="3"/><line x1="12" y1="21" x2="12" y2="12"/><line x1="12" y1="8" x2="12" y2="3"/><line x1="20" y1="21" x2="20" y2="16"/><line x1="20" y1="12" x2="20" y2="3"/><line x1="1" y1="14" x2="7" y2="14"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="17" y1="16" x2="23" y2="16"/></IconBase>,
+            FolderPlus: (p) => <IconBase {...p}><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2v11z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></IconBase>,
+            Calendar: (p) => <IconBase {...p}><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></IconBase>,
+            Hash: (p) => <IconBase {...p}><line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/></IconBase>,
+            Briefcase: (p) => <IconBase {...p}><rect x="2" y="7" width="20" height="14" rx="2" ry="2"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></IconBase>
+        };
+
+        // --- COMPONENTS ---
+
+        const Dashboard = ({ onNavigate, projectData }) => {
+            const modules = [
+                { id: 'business', title: 'Business Modell', desc: 'Das Fundament: Wie schaffen wir Wert?', icon: Icons.TrendingUp, color: 'bg-blue-500', status: 'completed', progress: 100, target: 'business' },
+                { id: 'dna', title: 'Brand DNA', desc: 'Werte, Mission & Vision definieren.', icon: Icons.Fingerprint, color: 'bg-purple-500', status: 'active', progress: 0, target: 'dna' },
+                { id: 'positioning', title: 'Positionierung', desc: 'Markt-Verortung im Koordinatenkreuz.', icon: Icons.Target, color: 'bg-indigo-500', status: 'active', progress: 0, target: 'positioning' },
+                { id: 'structure', title: 'Markenarchitektur', desc: 'Hierarchie, Subbrands & Produkt-Logik.', icon: Icons.GitBranch, color: 'bg-emerald-500', status: 'active', progress: 0, target: 'structure' },
+                { id: 'target', title: 'Zielgruppen', desc: 'Wem helfen wir?', icon: Icons.Users, color: 'bg-pink-500', status: 'active', progress: 0, target: 'target' },
+                { id: 'message', title: 'Markenbotschaft', desc: 'Tonalität & Claims.', icon: Icons.MessageSquare, color: 'bg-orange-500', status: 'active', progress: 0, target: 'message' },
+                { id: 'naming', title: 'Naming', desc: 'Namensfindung.', icon: Icons.PenTool, color: 'bg-teal-500', status: 'active', progress: 0, target: 'naming' },
+                { id: 'brandbook', title: 'Brand Book', desc: 'Die Strategie als Fazit.', icon: Icons.BookOpen, color: 'bg-gray-800', status: 'active', progress: 0, target: 'brandbook' }
+            ];
+
+            return (
+                <div className="min-h-screen flex flex-col bg-gray-50">
+                    <header className="bg-white border-b px-8 py-4 flex justify-between items-center sticky top-0 z-10">
+                        <div className="flex items-center">
+                            <div className="w-8 h-8 bg-black rounded-lg flex items-center justify-center mr-3"><span className="text-white font-bold text-lg">B</span></div>
+                            <div>
+                                <h1 className="text-lg font-bold text-gray-900 leading-tight">Brand Builder OS 3.0</h1>
+                                <div className="flex items-center gap-2 text-xs text-gray-500">
+                                    <span className="font-semibold bg-gray-100 px-1 rounded">{projectData.id}</span>
+                                    <span>{projectData.name}</span>
+                                </div>
+                            </div>
+                        </div>
+                        <div className="flex items-center gap-4">
+                            <button onClick={() => onNavigate('projects')} className="text-sm text-gray-500 hover:text-gray-900 flex items-center gap-1">
+                                <Icons.ArrowLeft size={14}/> Alle Projekte
+                            </button>
+                            <div className="w-32 h-2 bg-gray-100 rounded-full overflow-hidden"><div className="h-full bg-gradient-to-r from-blue-500 to-purple-600 w-[20%]"></div></div>
+                        </div>
+                    </header>
+                    <main className="flex-1 p-8 max-w-7xl mx-auto w-full">
+                        <div className="mb-8"><h2 className="text-2xl font-bold text-gray-800 mb-2">Projekt: {projectData.name}</h2><p className="text-gray-600 max-w-2xl">Branche: {projectData.industry} • Lead: {projectData.lead}</p></div>
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+                            {modules.map((mod) => (
+                                <div key={mod.id} onClick={() => (mod.status === 'active' || mod.status === 'completed') && mod.target && onNavigate(mod.target)} className={`relative bg-white rounded-xl border transition-all duration-300 flex flex-col ${mod.status === 'locked' ? 'opacity-60 cursor-not-allowed border-gray-100' : 'cursor-pointer hover:shadow-lg hover:-translate-y-1 border-gray-200'}`}>
+                                    <div className="p-6 flex items-start justify-between"><div className={`p-3 rounded-lg ${mod.color} bg-opacity-10 text-white`}><mod.icon size={24} color="black" style={{ opacity: 0.7 }} /></div><div>{mod.status === 'completed' ? <Icons.CheckCircle2 className="text-green-500" size={20} /> : mod.status === 'active' ? <Icons.Play className="text-blue-600 fill-current" size={20} /> : <Icons.Lock className="text-gray-300" size={20} />}</div></div>
+                                    <div className="px-6 pb-6 flex-1 flex flex-col"><h3 className="text-lg font-bold text-gray-900 mb-1">{mod.title}</h3><p className="text-sm text-gray-500 mb-4 flex-1">{mod.desc}</p>{mod.status !== 'locked' && (<div className="mt-auto"><div className="w-full h-1.5 bg-gray-100 rounded-full overflow-hidden"><div className={`h-full ${mod.color}`} style={{ width: `${mod.progress}%` }}></div></div>{mod.status === 'active' && (<div className="mt-4 text-blue-600 text-sm font-medium flex items-center">Modul öffnen <Icons.ArrowRight size={14} className="ml-2" /></div>)}</div>)}</div>
+                                </div>
+                            ))}
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const BusinessModelTool = ({ onBack, globalData, onUpdate }) => {
+            const [problem, setProblem] = useState(globalData.business?.problem || '');
+            const [solution, setSolution] = useState(globalData.business?.solution || '');
+            const [usp, setUsp] = useState(globalData.business?.usp || '');
+            const [revenue, setRevenue] = useState(globalData.business?.revenue || '');
+            const [aiResponse, setAiResponse] = useState('');
+            const [isAiLoading, setIsAiLoading] = useState(false);
+
+            useEffect(() => {
+                onUpdate({ ...globalData, business: { problem, solution, usp, revenue } });
+            }, [problem, solution, usp, revenue]);
+
+            const checkModel = async () => {
+                setIsAiLoading(true);
+                try {
+                    const prompt = `Analysiere dieses Geschäftsmodell kurz:
+                    Problem: ${problem}
+                    Lösung: ${solution}
+                    USP: ${usp}
+                    Revenue: ${revenue}
+                    
+                    Gib kurzes Feedback zu Stärken und Schwächen und formuliere einen 1-Satz Elevator Pitch.`;
+                    const res = await queryGemini(prompt);
+                    setAiResponse(res);
+                } catch(e) { alert(e.message); } finally { setIsAiLoading(false); }
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20">
+                        <div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><div className="bg-blue-100 p-2 rounded-lg text-blue-600"><Icons.TrendingUp size={24}/></div><h1 className="text-xl font-bold">Business Modell (Lean)</h1></div>
+                    </header>
+                    <main className="flex-1 p-8 overflow-y-auto">
+                        <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div className="bg-white p-6 rounded-xl shadow-sm border space-y-4">
+                                <div><label className="text-xs font-bold block mb-1">Problem</label><textarea value={problem} onChange={e=>setProblem(e.target.value)} className="w-full border rounded p-2 text-sm h-24" placeholder="Welches Problem lösen wir?"/></div>
+                                <div><label className="text-xs font-bold block mb-1">Lösung</label><textarea value={solution} onChange={e=>setSolution(e.target.value)} className="w-full border rounded p-2 text-sm h-24" placeholder="Wie lösen wir es?"/></div>
+                            </div>
+                            <div className="bg-white p-6 rounded-xl shadow-sm border space-y-4">
+                                <div><label className="text-xs font-bold block mb-1">Unique Selling Proposition (USP)</label><textarea value={usp} onChange={e=>setUsp(e.target.value)} className="w-full border rounded p-2 text-sm h-24" placeholder="Warum wir?"/></div>
+                                <div><label className="text-xs font-bold block mb-1">Revenue Streams</label><textarea value={revenue} onChange={e=>setRevenue(e.target.value)} className="w-full border rounded p-2 text-sm h-24" placeholder="Wie verdienen wir Geld?"/></div>
+                            </div>
+                            <div className="md:col-span-2">
+                                <button onClick={checkModel} className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold w-full flex justify-center gap-2 mb-6">{isAiLoading ? <Icons.Loader2 className="animate-spin"/> : <Icons.Sparkles/>} Modell prüfen & Pitch erstellen</button>
+                                {aiResponse && <div className="bg-white p-6 rounded-xl shadow-sm border"><h3 className="font-bold text-blue-800 mb-2">KI Analyse</h3><MarkdownRenderer content={aiResponse} /></div>}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const BrandDNATool = ({ onBack, globalData, onUpdate }) => {
+            const [pool, setPool] = useState(globalData.dna?.pool || [{ id: 'w1', text: 'Innovation', layer: 0 }, { id: 'w2', text: 'Nachhaltigkeit', layer: 1 }, { id: 'w3', text: 'Qualität', layer: 2 }]);
+            const [placedItems, setPlacedItems] = useState(globalData.dna?.placedItems || []);
+            const [dragState, setDragState] = useState(null);
+            const [activeLayer, setActiveLayer] = useState(null);
+            const [aiResponse, setAiResponse] = useState('');
+            const [aiTitle, setAiTitle] = useState('');
+            const [isAiLoading, setIsAiLoading] = useState(false);
+            const [showAiModal, setShowAiModal] = useState(false);
+            const [customInput, setCustomInput] = useState('');
+            const boardRef = useRef(null);
+
+            useEffect(() => {
+                onUpdate({ ...globalData, dna: { pool, placedItems } });
+            }, [pool, placedItems]);
+
+            const handleAI = async (prompt, title) => {
+                setAiTitle(title); setShowAiModal(true); setIsAiLoading(true); setAiResponse('');
+                try { const res = await queryGemini(prompt); setAiResponse(res); } catch (e) { setAiResponse(e.message); } finally { setIsAiLoading(false); }
+            };
+
+            const toggleFullscreen = () => { if (boardRef.current) { if (!document.fullscreenElement) { boardRef.current.requestFullscreen().catch(err => alert(`Error: ${err.message}`)); } else { document.exitFullscreen(); } } };
+            const getDNAContent = () => ({ core: placedItems.filter(i => i.layer === 0).map(i => i.text).join(', '), values: placedItems.filter(i => i.layer === 1).map(i => i.text).join(', '), proof: placedItems.filter(i => i.layer === 2).map(i => i.text).join(', ') });
+            
+            const fetchSuggestions = async () => {
+                 setIsAiLoading(true);
+                 try {
+                     const res = await queryGemini(`Generiere 10 Schlagworte für Brand DNA in Branche "${globalData.industry}". Nur Wörter, kommagetrennt.`);
+                     const words = res.split(',').map(w => w.trim()).filter(w => w.length);
+                     setPool(prev => [...prev, ...words.map((w, i) => ({ id: `ai-${Date.now()}-${i}`, text: w }))]);
+                 } catch(e) { alert(e.message); } finally { setIsAiLoading(false); }
+            };
+
+            const getLayerFromCoords = (x, y) => { const dx = x - 50; const dy = y - 50; const dist = Math.sqrt(dx*dx + dy*dy); if (dist < 13) return 0; if (dist < 28) return 1; if (dist < 45) return 2; return -1; };
+            const handleMouseDown = (e, item, source) => { e.stopPropagation(); if(!boardRef.current) return; const rect = boardRef.current.getBoundingClientRect(); setDragState({ item, source, startX: e.clientX, startY: e.clientY, currentX: ((e.clientX - rect.left) / rect.width) * 100, currentY: ((e.clientY - rect.top) / rect.height) * 100 }); };
+            const handleMouseMove = (e) => { if(!dragState || !boardRef.current) return; const rect = boardRef.current.getBoundingClientRect(); const x = ((e.clientX - rect.left) / rect.width) * 100; const y = ((e.clientY - rect.top) / rect.height) * 100; setDragState(prev => ({...prev, currentX: x, currentY: y})); setActiveLayer(getLayerFromCoords(x, y)); };
+            const handleMouseUp = () => { if(!dragState) return; const layer = activeLayer; if (layer !== -1) { setPlacedItems(prev => [...prev.filter(i => i.id !== dragState.item.id), { ...dragState.item, x: dragState.currentX, y: dragState.currentY, layer }]); if (dragState.source === 'pool') setPool(prev => prev.filter(i => i.id !== dragState.item.id)); } else if (dragState.source === 'board') { setPlacedItems(prev => prev.filter(i => i.id !== dragState.item.id)); setPool(prev => [...prev, dragState.item]); } setDragState(null); setActiveLayer(null); };
+            useEffect(() => { if(dragState) { window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); } return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); } }, [dragState]);
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20"><div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><div className="bg-purple-100 p-2 rounded-lg text-purple-600"><Icons.Fingerprint size={24}/></div><h1 className="text-xl font-bold">Brand DNA</h1></div><div className="flex gap-4 items-center text-sm text-gray-500"><span>{globalData.name}</span><button onClick={toggleFullscreen} className="p-2 border rounded hover:bg-gray-50" title="Vollbild"><Icons.Maximize size={16}/></button></div></header>
+                    <div className="flex flex-1 overflow-hidden">
+                        <aside className="w-72 bg-white border-r flex flex-col z-10 shadow-lg"><div className="p-4 border-b"><button onClick={fetchSuggestions} className="w-full bg-purple-50 text-purple-700 py-2 rounded text-xs flex items-center justify-center gap-2">{isAiLoading?<Icons.Loader2 className="animate-spin" size={12}/>:<Icons.RefreshCw size={12}/>} KI Vorschläge</button></div><div className="flex-1 overflow-y-auto p-4 space-y-2">{pool.map(i => <div key={i.id} onMouseDown={e=>handleMouseDown(e, i, 'pool')} className="bg-white border px-3 py-2 rounded cursor-grab text-sm">{i.text}</div>)}</div><div className="p-4 border-t flex gap-2"><input value={customInput} onChange={e=>setCustomInput(e.target.value)} className="flex-1 border rounded px-2 text-sm" placeholder="Begriff..." /><button onClick={()=>{if(customInput){setPool([...pool,{id:`c-${Date.now()}`,text:customInput}]);setCustomInput('')}}} className="bg-gray-800 text-white rounded p-1"><Icons.Plus size={16}/></button></div></aside>
+                        <main className="flex-1 bg-gray-100 relative flex items-center justify-center overflow-hidden"><div className="absolute top-4 left-4 z-20 flex flex-col gap-2 no-print"><div className="text-xs bg-white/80 px-3 py-1 rounded-full border"><span className="w-2 h-2 rounded-full bg-yellow-400 inline-block mr-2"/>KERN</div><div className="text-xs bg-white/80 px-3 py-1 rounded-full border"><span className="w-2 h-2 rounded-full bg-blue-400 inline-block mr-2"/>WERTE</div><div className="text-xs bg-white/80 px-3 py-1 rounded-full border"><span className="w-2 h-2 rounded-full bg-gray-300 inline-block mr-2"/>BEWEISE</div></div><div className="absolute bottom-8 right-8 z-30 flex flex-col gap-3 items-end controls"><button onClick={()=>handleAI(`Check Consistency based on industry ${globalData.industry}: ${JSON.stringify(getDNAContent())}`, "Check")} className="bg-white px-4 py-2 rounded-full shadow text-sm flex gap-2"><Icons.ShieldCheck size={16}/> Check</button><button onClick={()=>handleAI(`Generate Claims for ${globalData.name} (${globalData.industry}): ${JSON.stringify(getDNAContent())}`, "Claims")} className="bg-white px-4 py-2 rounded-full shadow text-sm flex gap-2"><Icons.MessageSquareQuote size={16}/> Claims</button><button onClick={()=>handleAI(`Write Manifesto for ${globalData.name}: ${JSON.stringify(getDNAContent())}`, "Manifesto")} className="bg-gray-900 text-white px-6 py-3 rounded-full shadow-xl text-sm flex gap-2"><Icons.Sparkles size={18}/> Manifest</button></div>{showAiModal && <div className="ai-modal absolute top-4 right-4 w-96 bg-white rounded-xl shadow-2xl border z-50 flex flex-col max-h-[80vh]"><div className="p-4 bg-purple-50 rounded-t-xl flex justify-between"><h4 className="font-bold text-purple-800 flex gap-2"><Icons.Sparkles size={16}/> {aiTitle}</h4><button onClick={()=>setShowAiModal(false)}><Icons.X size={16}/></button></div><div className="p-6 overflow-y-auto text-sm bg-white">{isAiLoading?<div className="flex justify-center"><Icons.Loader2 className="animate-spin text-purple-400"/></div>:<MarkdownRenderer content={aiResponse}/>}</div></div>}<div ref={boardRef} className="w-full max-w-[800px] aspect-square relative flex items-center justify-center select-none bg-white rounded-xl"><div className={`absolute w-[90%] h-[90%] rounded-full border-2 transition-all ${activeLayer===2?'bg-gray-200/50 scale-105':'bg-white'}`}></div><div className={`absolute w-[56%] h-[56%] rounded-full border-2 transition-all ${activeLayer===1?'bg-blue-100/50 scale-105':'bg-blue-50'}`}></div><div className={`absolute w-[26%] h-[26%] rounded-full border-4 transition-all flex items-center justify-center ${activeLayer===0?'bg-yellow-100 scale-110':'bg-yellow-50'}`}><span className="text-yellow-600/50 font-bold text-[10px]">WHY</span></div>{placedItems.map(i => <div key={i.id} onMouseDown={e=>handleMouseDown(e, i, 'board')} className={`absolute px-3 py-1.5 rounded-full shadow-sm text-xs cursor-grab transform -translate-x-1/2 -translate-y-1/2 ${i.layer===0?'bg-yellow-400':i.layer===1?'bg-blue-500 text-white':'bg-white border'}`} style={{left:`${i.x}%`, top:`${i.y}%`}}>{i.text}</div>)}</div>{dragState && <div className="fixed px-3 py-1.5 rounded-full bg-purple-600 text-white shadow-xl text-xs pointer-events-none z-50 transform -translate-x-1/2 -translate-y-1/2" style={{left: dragState.startX, top: dragState.startY}}>{dragState.item.text}</div>}</main>
+                    </div>
+                </div>
+            );
+        };
+
+        const PositioningTool = ({ onBack, globalData, onUpdate }) => {
+            const [labels, setLabels] = useState(globalData.positioning?.labels || { top: 'Breites Publikum', bottom: 'Spezialisten', left: 'Traditionell', right: 'Trendsetter' });
+            const [logos, setLogos] = useState(globalData.positioning?.logos || []);
+            const [arrows, setArrows] = useState(globalData.positioning?.arrows || []);
+            const [selectedId, setSelectedId] = useState(null);
+            const [selectionType, setSelectionType] = useState(null);
+            const [dragState, setDragState] = useState(null);
+            const [aiResponse, setAiResponse] = useState('');
+            const [aiTitle, setAiTitle] = useState('');
+            const [showAiModal, setShowAiModal] = useState(false);
+            const [isAiLoading, setIsAiLoading] = useState(false);
+            const boardRef = useRef(null);
+
+            useEffect(() => {
+                onUpdate({ ...globalData, positioning: { labels, logos, arrows } });
+            }, [labels, logos, arrows]);
+
+            const analyzeStrategy = () => {
+                const arrow = arrows.find(a => a.id === selectedId); if(!arrow) return;
+                const startX = Math.round(arrow.startX); const startY = Math.round(arrow.startY);
+                const endX = Math.round(arrow.endX); const endY = Math.round(arrow.endY);
+                const prompt = `Analysiere strategische Neupositionierung für ${globalData.name} (${globalData.industry}). Matrix: X (${labels.left}-${labels.right}), Y (${labels.top}-${labels.bottom}). Bewegung: Von [${startX}%, ${startY}%] NACH [${endX}%, ${endY}%]. Was bedeutet das strategisch?`;
+                setAiTitle("Strategie-Analyse"); setShowAiModal(true); setIsAiLoading(true);
+                queryGemini(prompt).then(setAiResponse).catch(e => setAiResponse(e.message)).finally(() => setIsAiLoading(false));
+            };
+
+            const analyzePosition = () => {
+                 const logo = logos.find(l => l.id === selectedId); if(!logo) return;
+                 setAiTitle("Positions-Analyse"); setShowAiModal(true); setIsAiLoading(true);
+                 queryGemini(`Analysiere Position [X:${Math.round(logo.x)}%, Y:${Math.round(logo.y)}%] in Matrix (${labels.left}-${labels.right}, ${labels.top}-${labels.bottom}) für ${globalData.name} (${globalData.industry}).`).then(setAiResponse).catch(e => setAiResponse(e.message)).finally(() => setIsAiLoading(false));
+            };
+
+            const deleteItem = () => {
+                if(selectionType==='logo') setLogos(prev => prev.filter(l=>l.id!==selectedId));
+                else if(selectionType==='arrow') setArrows(prev => prev.filter(a=>a.id!==selectedId));
+                setSelectedId(null); setSelectionType(null);
+            };
+
+            const toggleFullscreen = () => { if (boardRef.current) { if (!document.fullscreenElement) boardRef.current.requestFullscreen().catch(err => alert(err)); else document.exitFullscreen(); } };
+
+            const handleFileUpload = (e) => {
+                const file = e.target.files[0]; if (!file) return;
+                const reader = new FileReader();
+                reader.onload = (evt) => {
+                    const img = new Image();
+                    img.onload = () => setLogos(prev => [...prev, { id: `logo-${Date.now()}`, src: evt.target.result, x: 50, y: 50, width: 120 }]);
+                    img.src = evt.target.result;
+                };
+                reader.readAsDataURL(file); e.target.value = '';
+            };
+
+            const handleMouseDown = (e, type, id, data) => {
+                e.stopPropagation();
+                setSelectedId(id); setSelectionType(type.includes('arrow') ? 'arrow' : type === 'resize' ? 'logo' : type);
+                if (boardRef.current) setDragState({ type, id, startMouseX: e.clientX, startMouseY: e.clientY, initialData: { ...data } });
+            };
+
+            const handleMouseMove = (e) => {
+                if (!dragState || !boardRef.current) return;
+                const rect = boardRef.current.getBoundingClientRect();
+                const dX = e.clientX - dragState.startMouseX;
+                const dY = e.clientY - dragState.startMouseY;
+                const dXP = (dX / rect.width) * 100;
+                const dYP = (dY / rect.height) * 100;
+                const clamp = (val) => Math.min(100, Math.max(0, val));
+
+                if (dragState.type === 'logo') {
+                    setLogos(p => p.map(l => l.id === dragState.id ? { ...l, x: clamp(dragState.initialData.x + dXP), y: clamp(dragState.initialData.y + dYP) } : l));
+                } else if (dragState.type === 'resize') {
+                    setLogos(p => p.map(l => l.id === dragState.id ? { ...l, width: Math.max(30, dragState.initialData.width + dX * 2) } : l));
+                } else if (dragState.type === 'arrowStart') {
+                    setArrows(p => p.map(a => a.id === dragState.id ? { ...a, startX: clamp(dragState.initialData.startX + dXP), startY: clamp(dragState.initialData.startY + dYP) } : a));
+                } else if (dragState.type === 'arrowEnd') {
+                    setArrows(p => p.map(a => a.id === dragState.id ? { ...a, endX: clamp(dragState.initialData.endX + dXP), endY: clamp(dragState.initialData.endY + dYP) } : a));
+                } else if (dragState.type === 'arrow') {
+                    setArrows(p => p.map(a => a.id === dragState.id ? { ...a, startX: clamp(dragState.initialData.startX + dXP), startY: clamp(dragState.initialData.startY + dYP), endX: clamp(dragState.initialData.endX + dXP), endY: clamp(dragState.initialData.endY + dYP) } : a));
+                }
+            };
+
+            const handleMouseUp = () => setDragState(null);
+            useEffect(() => { if(dragState) { window.addEventListener('mousemove', handleMouseMove); window.addEventListener('mouseup', handleMouseUp); } return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp); } }, [dragState]);
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20"><div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><h1 className="text-xl font-bold">Strategy Matrix</h1></div><div className="flex items-center gap-2 text-sm text-gray-500"><span>{globalData.name}</span><button onClick={toggleFullscreen} className="p-2 border rounded hover:bg-gray-50" title="Vollbild"><Icons.Maximize size={16}/></button></div></header>
+                    <div className="flex flex-1 overflow-hidden">
+                        <aside className="w-80 bg-white border-r p-6 overflow-y-auto z-10 flex flex-col gap-8">
+                             <div><h3 className="text-sm font-bold mb-2">Kontext</h3><input value={globalData.industry} disabled className="w-full border rounded px-3 py-2 text-sm bg-gray-50"/></div>
+                             <div><h3 className="text-sm font-bold mb-2">Achsen</h3>{Object.keys(labels).map(k => <input key={k} value={labels[k]} onChange={e=>setLabels({...labels,[k]:e.target.value})} className="w-full border rounded px-3 py-2 text-sm mb-2"/>)}</div>
+                             <div><h3 className="text-sm font-bold mb-2">Werkzeuge</h3><div className="space-y-3"><label className="flex items-center justify-center w-full px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer hover:bg-gray-50"><input type="file" accept="image/*" onChange={handleFileUpload} className="hidden"/><div className="text-center"><Icons.Upload size={20} className="mx-auto text-gray-400"/><span className="text-sm text-gray-600">Logo</span></div></label><button onClick={()=>{const newA={id:`a-${Date.now()}`,startX:50,startY:50,endX:70,endY:30,color:'#ef4444'};setArrows([...arrows,newA]);setSelectedId(newA.id);setSelectionType('arrow');}} className="w-full flex items-center justify-center px-4 py-2 rounded border hover:bg-gray-50"><Icons.ArrowRight size={16} className="mr-2"/> Pfeil</button><button onClick={deleteItem} disabled={!selectedId} className="w-full flex items-center justify-center px-4 py-2 rounded border hover:bg-red-50 text-red-600"><Icons.Trash2 size={16} className="mr-2"/> Löschen</button></div></div>
+                             {selectedId && <div className="border-t pt-6">{selectionType==='logo'?<button onClick={analyzePosition} className="w-full bg-purple-600 text-white py-2 rounded shadow text-sm">Position Analyse</button>:<button onClick={analyzeStrategy} className="w-full bg-purple-600 text-white py-2 rounded shadow text-sm">Strategie Analyse</button>}</div>}
+                        </aside>
+                        <main ref={boardRef} className="flex-1 bg-gray-100 relative flex items-center justify-center p-8 overflow-hidden" onClick={()=>setSelectedId(null)}>
+                            {showAiModal && <div className="ai-modal absolute top-4 right-4 w-96 bg-white rounded-xl shadow-2xl border z-50 flex flex-col max-h-[80vh]"><div className="p-4 bg-purple-50 rounded-t-xl flex justify-between"><h4 className="font-bold text-purple-800 flex gap-2"><Icons.Sparkles size={16}/> {aiTitle}</h4><button onClick={()=>setShowAiModal(false)}><Icons.X size={16}/></button></div><div className="p-6 overflow-y-auto text-sm bg-white">{isAiLoading?<div className="flex justify-center"><Icons.Loader2 className="animate-spin text-purple-400"/></div>:<MarkdownRenderer content={aiResponse}/>}</div></div>}
+                            <div className="relative bg-white shadow-2xl w-full h-full max-w-4xl aspect-square bg-white rounded-xl">
+                                <div className="absolute inset-0 pointer-events-none"><div className="absolute top-1/2 w-full h-0.5 bg-gray-800"></div><div className="absolute left-1/2 h-full w-0.5 bg-gray-800"></div></div>
+                                <div className="absolute top-2 left-1/2 -translate-x-1/2 font-bold text-gray-700 bg-white/80 px-2 rounded">{labels.top}</div><div className="absolute bottom-2 left-1/2 -translate-x-1/2 font-bold text-gray-700 bg-white/80 px-2 rounded">{labels.bottom}</div><div className="absolute top-1/2 left-2 -translate-y-1/2 font-bold text-gray-700 bg-white/80 px-2 rounded">{labels.left}</div><div className="absolute top-1/2 right-2 -translate-y-1/2 font-bold text-gray-700 bg-white/80 px-2 rounded">{labels.right}</div>
+                                {logos.map(l => <div key={l.id} className={`absolute transform -translate-x-1/2 -translate-y-1/2 cursor-grab ${selectedId===l.id?'ring-2 ring-blue-500':''}`} style={{left:`${l.x}%`, top:`${l.y}%`, width:`${l.width}px`}} onMouseDown={e=>handleMouseDown(e,'logo',l.id,l)} onClick={e=>e.stopPropagation()}><img src={l.src} className="w-full h-full object-contain pointer-events-none" />{selectedId===l.id && <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-white border-2 border-blue-500 rounded-full cursor-nwse-resize" onMouseDown={e=>handleMouseDown(e,'resize',l.id,l)}/>}</div>)}
+                                <svg className="absolute inset-0 w-full h-full pointer-events-none z-20">
+                                    <defs>{arrows.map(a => <marker key={a.id} id={`arrow-${a.id}`} markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto"><polygon points="0 0, 10 3.5, 0 7" fill={a.color}/></marker>)}</defs>
+                                    {arrows.map(a => (
+                                        <g key={a.id}>
+                                            {selectedId === a.id && <line x1={`${a.startX}%`} y1={`${a.startY}%`} x2={`${a.endX}%`} y2={`${a.endY}%`} stroke="rgba(59, 130, 246, 0.5)" strokeWidth="12" strokeLinecap="round" className="pointer-events-none transition-all duration-300" />}
+                                            <line x1={`${a.startX}%`} y1={`${a.startY}%`} x2={`${a.endX}%`} y2={`${a.endY}%`} stroke="transparent" strokeWidth="20" className="pointer-events-auto cursor-move" onMouseDown={e=>handleMouseDown(e,'arrow',a.id,a)}/>
+                                            <line x1={`${a.startX}%`} y1={`${a.startY}%`} x2={`${a.endX}%`} y2={`${a.endY}%`} stroke={a.color} strokeWidth="3" markerEnd={`url(#arrow-${a.id})`} className="pointer-events-none" />
+                                            <circle cx={`${a.startX}%`} cy={`${a.startY}%`} r="12" fill="transparent" className="pointer-events-auto cursor-move" onMouseDown={e=>handleMouseDown(e,'arrowStart',a.id,a)}/>
+                                            <circle cx={`${a.startX}%`} cy={`${a.startY}%`} r="6" fill={a.color} className="pointer-events-none" />
+                                            <circle cx={`${a.endX}%`} cy={`${a.endY}%`} r="12" fill="transparent" className="pointer-events-auto cursor-move" onMouseDown={e=>handleMouseDown(e,'arrowEnd',a.id,a)}/>
+                                            <circle cx={`${a.endX}%`} cy={`${a.endY}%`} r="6" fill={a.color} className="pointer-events-none" />
+                                        </g>
+                                    ))}
+                                </svg>
+                            </div>
+                        </main>
+                    </div>
+                </div>
+            );
+        };
+
+        const BrandStructureTool = ({ onBack, globalData, onUpdate }) => {
+            const [root, setRoot] = useState(globalData.structure?.root || { id: 'root', name: 'Masterbrand', type: 'master', isOpen: true, children: [] });
+            const [selectedNodeId, setSelectedNodeId] = useState(null);
+            const [isAiLoading, setIsAiLoading] = useState(false);
+            const boardRef = useRef(null);
+
+            useEffect(() => { onUpdate({ ...globalData, structure: { root } }); }, [root]);
+
+            const findNode = (node, id) => { if (node.id === id) return node; for (let child of node.children || []) { const found = findNode(child, id); if (found) return found; } return null; };
+            const updateTree = (node, id, updateFn) => { if (node.id === id) return updateFn(node); return { ...node, children: node.children ? node.children.map(c => updateTree(c, id, updateFn)) : [] }; };
+            const addNode = (parentId, type) => { const newNode = { id: `n-${Date.now()}`, name: type === 'product' ? 'Produkt' : 'Subbrand', type, children: [], isOpen: true }; setRoot(prev => updateTree(prev, parentId, (n) => ({ ...n, children: [...(n.children || []), newNode], isOpen: true }))); };
+            const deleteNode = (id) => { if (id === 'root') return alert("Masterbrand kann nicht gelöscht werden."); const deleteRecursive = (node) => ({ ...node, children: node.children ? node.children.filter(c => c.id !== id).map(deleteRecursive) : [] }); setRoot(prev => deleteRecursive(prev)); setSelectedNodeId(null); };
+            const updateNodeName = (id, newName) => { setRoot(prev => updateTree(prev, id, (n) => ({ ...n, name: newName }))); };
+            const toggleOpen = (id) => { setRoot(prev => updateTree(prev, id, (n) => ({ ...n, isOpen: !n.isOpen }))); };
+            const toggleFullscreen = () => { if (boardRef.current) { if (!document.fullscreenElement) boardRef.current.requestFullscreen().catch(err => alert(err)); else document.exitFullscreen(); } };
+
+            const generateStructure = async () => {
+                if (!globalData.industry) return alert("Bitte Branche eingeben.");
+                setIsAiLoading(true);
+                try {
+                    const prompt = `Erstelle JSON Struktur für Markenarchitektur Branche "${globalData.industry}". Format: { "name": "Markenname", "type": "master", "children": [...] }`;
+                    const res = await queryGemini(prompt);
+                    const json = JSON.parse(res.replace(/```json|```/g, '').trim());
+                    const hydrate = (node) => ({ ...node, id: `ai-${Math.random()}`, isOpen: true, children: node.children ? node.children.map(hydrate) : [] });
+                    setRoot(hydrate(json));
+                } catch(e) { alert(e.message); } finally { setIsAiLoading(false); }
+            };
+
+            const selectedNode = selectedNodeId ? findNode(root, selectedNodeId) : null;
+            const renderTreeItem = (node, level=0) => (
+                <div key={node.id} className="select-none">
+                    <div className={`flex items-center py-1.5 px-2 cursor-pointer rounded ${selectedNodeId===node.id?'bg-emerald-100 text-emerald-800':'hover:bg-gray-100'}`} style={{paddingLeft:`${level*16+8}px`}} onClick={()=>setSelectedNodeId(node.id)}>
+                        <div onClick={e=>{e.stopPropagation();toggleOpen(node.id)}} className="mr-1 p-0.5">{node.isOpen?<Icons.ArrowRight className="rotate-90" size={12}/>:<Icons.ArrowRight size={12}/>}</div>
+                        {node.type==='master'?<Icons.Share2 size={16}/>:node.type==='sub'?<Icons.Layers size={16}/>:<Icons.ShoppingBag size={16}/>}
+                        <span className="ml-2 text-sm font-medium">{node.name}</span>
+                    </div>
+                    {node.isOpen && node.children && <div>{node.children.map(c=>renderTreeItem(c,level+1))}</div>}
+                </div>
+            );
+
+            const renderVisualNode = (node) => {
+                const isSelected = selectedNodeId === node.id;
+                return (
+                    <div key={node.id} className="flex flex-col items-center">
+                        <div onClick={()=>setSelectedNodeId(node.id)} className={`border-2 rounded-xl p-4 min-w-[140px] text-center bg-white shadow-sm cursor-pointer z-10 ${isSelected?'border-emerald-500 ring-2 ring-emerald-100':'border-gray-200'}`}>
+                            <div className="flex justify-center mb-2">{node.type==='master'?<div className="bg-emerald-100 p-2 rounded-full"><Icons.Share2 size={20} className="text-emerald-600"/></div>:node.type==='sub'?<div className="bg-blue-100 p-2 rounded-full"><Icons.Layers size={20} className="text-blue-600"/></div>:<div className="bg-orange-100 p-2 rounded-full"><Icons.ShoppingBag size={20} className="text-orange-600"/></div>}</div>
+                            <div className="font-bold text-gray-800 text-sm">{node.name}</div>
+                        </div>
+                        {node.children && node.children.length > 0 && <div className="flex flex-col items-center w-full"><div className="h-6 w-px bg-gray-300"></div><div className="flex relative">{node.children.length>1 && <div className="absolute top-0 left-0 right-0 h-px bg-gray-300 mx-[calc(50%/var(--child-count))]"></div>}<div className="flex gap-8 pt-0">{node.children.map((c,i)=><div key={c.id} className="flex flex-col items-center relative"><div className={`absolute top-0 w-full h-px ${node.children.length===1?'hidden':'block'}`}><div className={`h-px bg-gray-300 absolute top-0 ${i===0?'right-0 w-1/2':i===node.children.length-1?'left-0 w-1/2':'w-full left-0'}`}></div></div><div className="h-6 w-px bg-gray-300"></div>{renderVisualNode(c)}</div>)}</div></div></div>}
+                    </div>
+                );
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20"><div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><h1 className="text-xl font-bold">Markenarchitektur</h1></div><div className="flex items-center gap-2 text-sm text-gray-500"><span>{globalData.name}</span><button onClick={generateStructure} className="bg-emerald-600 text-white px-3 py-1 rounded text-sm flex gap-1">{isAiLoading?<Icons.Loader2 className="animate-spin" size={16}/>:<Icons.Sparkles size={16}/>} KI</button><button onClick={toggleFullscreen} className="p-2 border rounded hover:bg-gray-50" title="Vollbild"><Icons.Maximize size={16}/></button></div></header>
+                    <div className="flex flex-1 overflow-hidden">
+                        <aside className="w-80 bg-white border-r flex flex-col z-10 overflow-y-auto"><div className="p-2">{renderTreeItem(root)}</div></aside>
+                        <main ref={boardRef} className="flex-1 bg-gray-100 relative overflow-auto flex justify-center p-8 bg-white rounded-xl"><div className="mt-8">{renderVisualNode(root)}</div></main>
+                        {selectedNode && <div className="w-64 bg-white border-l p-4 shadow-lg z-20">
+                            <h3 className="font-bold mb-4">Bearbeiten</h3>
+                            <div className="space-y-4">
+                                <div><label className="text-xs font-bold block">Name</label><input value={selectedNode.name} onChange={e=>updateNodeName(selectedNode.id, e.target.value)} className="w-full border p-2 rounded text-sm"/></div>
+                                {selectedNode.type!=='product' && <button onClick={()=>addNode(selectedNode.id, 'sub')} className="w-full border p-2 rounded text-sm flex gap-2 justify-center"><Icons.Layers size={14}/> Subbrand</button>}
+                                <button onClick={()=>addNode(selectedNode.id, 'product')} className="w-full border p-2 rounded text-sm flex gap-2 justify-center"><Icons.ShoppingBag size={14}/> Produkt</button>
+                                {selectedNode.id!=='root' && <button onClick={()=>deleteNode(selectedNode.id)} className="w-full border p-2 rounded text-sm flex gap-2 justify-center text-red-600 hover:bg-red-50"><Icons.Trash2 size={14}/> Löschen</button>}
+                            </div>
+                        </div>}
+                    </div>
+                </div>
+            );
+        };
+        
+        const TargetAudienceTool = ({ onBack, globalData, onUpdate }) => {
+             const [product, setProduct] = useState('');
+             const [personas, setPersonas] = useState(globalData.target?.personas || []);
+             const [isAiLoading, setIsAiLoading] = useState(false);
+
+             useEffect(() => { onUpdate({ ...globalData, target: { personas } }); }, [personas]);
+             
+             const generatePersonas = async () => {
+                 if(!globalData.industry) return alert("Bitte Branche im Dashboard definieren");
+                 setIsAiLoading(true);
+                 try {
+                     const prompt = `Erstelle 3 detaillierte Buyer Personas für ${globalData.industry} ${product ? 'mit Fokus auf ' + product : ''}. 
+                     Format für jede Persona: 
+                     - Name & Alter
+                     - Beruf
+                     - Ein typisches Zitat
+                     - Hauptbedürfnis
+                     - Größte Frustration
+                     Antworte in strukturiertem Markdown mit Überschriften.`;
+                     const res = await queryGemini(prompt);
+                     setPersonas([res]); 
+                 } catch(e) { alert(e.message); } finally { setIsAiLoading(false); }
+             };
+
+             return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20">
+                        <div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><div className="bg-pink-100 p-2 rounded-lg text-pink-600"><Icons.Users size={24}/></div><h1 className="text-xl font-bold">Zielgruppen Personas</h1></div>
+                        <div className="text-sm text-gray-500">{globalData.name}</div>
+                    </header>
+                    <main className="flex-1 p-8 overflow-y-auto">
+                        <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="md:col-span-1 space-y-4">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border">
+                                    <h3 className="font-bold mb-4">Input</h3>
+                                    <div className="space-y-4">
+                                        <div><label className="text-xs font-bold text-gray-500 block mb-1">Produkt/Fokus</label><input value={product} onChange={e=>setProduct(e.target.value)} className="w-full border p-2 rounded text-sm" placeholder="z.B. Abo-Modell"/></div>
+                                        <button onClick={generatePersonas} className="w-full bg-pink-600 text-white py-2 rounded font-medium flex justify-center gap-2 mt-4">{isAiLoading?<Icons.Loader2 className="animate-spin"/>:<Icons.Sparkles/>} ✨ Erstelle Personas</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="md:col-span-2">
+                                 {personas.length > 0 ? (
+                                     <div className="bg-white p-8 rounded-xl shadow-sm border min-h-[400px]">
+                                        <MarkdownRenderer content={personas[0]} />
+                                     </div>
+                                 ) : (
+                                     <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 h-[400px] flex items-center justify-center text-gray-400 flex-col gap-2">
+                                        <Icons.Users size={48} className="opacity-20"/>
+                                        <p>Definiere deinen Bereich und lass die KI arbeiten.</p>
+                                     </div>
+                                 )}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+             );
+        };
+        
+        const NamingTool = ({ onBack }) => {
+            const [context, setContext] = useState('');
+            const [vibe, setVibe] = useState('modern');
+            const [names, setNames] = useState('');
+            const [isAiLoading, setIsAiLoading] = useState(false);
+
+            const generateNames = async () => {
+                if(!context) return alert("Bitte Kontext angeben");
+                setIsAiLoading(true);
+                try {
+                    const prompt = `Entwickle 10 kreative Markennamen für "${context}" mit dem Stil/Vibe "${vibe}".
+                    Bitte gruppiere sie nach Kategorien (z.B. Deskriptiv, Abstrakt, Assoziativ).
+                    Gib zu jedem Namen eine kurze Begründung.`;
+                    const res = await queryGemini(prompt);
+                    setNames(res);
+                } catch(e) { alert(e.message); } finally { setIsAiLoading(false); }
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20">
+                        <div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><div className="bg-teal-100 p-2 rounded-lg text-teal-600"><Icons.PenTool size={24}/></div><h1 className="text-xl font-bold">Naming Tool</h1></div>
+                    </header>
+                    <main className="flex-1 p-8 overflow-y-auto">
+                        <div className="max-w-4xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-6">
+                            <div className="md:col-span-1 space-y-4">
+                                <div className="bg-white p-6 rounded-xl shadow-sm border">
+                                    <h3 className="font-bold mb-4">Briefing</h3>
+                                    <div className="space-y-4">
+                                        <div><label className="text-xs font-bold text-gray-500 block mb-1">Was soll benannt werden?</label><input value={context} onChange={e=>setContext(e.target.value)} className="w-full border p-2 rounded text-sm" placeholder="z.B. App für Hobbygärtner"/></div>
+                                        <div><label className="text-xs font-bold text-gray-500 block mb-1">Gewünschter Vibe</label>
+                                            <select value={vibe} onChange={e=>setVibe(e.target.value)} className="w-full border p-2 rounded text-sm bg-white">
+                                                <option value="modern">Modern & Clean</option>
+                                                <option value="playful">Verspielt & Kreativ</option>
+                                                <option value="traditional">Traditionell & Seriös</option>
+                                                <option value="luxury">Luxuriös & Exklusiv</option>
+                                            </select>
+                                        </div>
+                                        <button onClick={generateNames} className="w-full bg-teal-600 text-white py-2 rounded font-medium flex justify-center gap-2 mt-4">{isAiLoading?<Icons.Loader2 className="animate-spin"/>:<Icons.Sparkles/>} ✨ Namen finden</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div className="md:col-span-2">
+                                 {names ? (
+                                     <div className="bg-white p-8 rounded-xl shadow-sm border min-h-[400px]">
+                                        <MarkdownRenderer content={names} />
+                                     </div>
+                                 ) : (
+                                     <div className="bg-gray-100 rounded-xl border-2 border-dashed border-gray-300 h-[400px] flex items-center justify-center text-gray-400 flex-col gap-2">
+                                        <Icons.PenTool size={48} className="opacity-20"/>
+                                        <p>Starte den Namensfindungsprozess.</p>
+                                     </div>
+                                 )}
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const MessagingTool = ({ onBack, globalData, onUpdate }) => {
+            const [tone, setTone] = useState(50);
+            const [elevatorPitch, setElevatorPitch] = useState(globalData.message?.pitch || '');
+            const [isAiLoading, setIsAiLoading] = useState(false);
+
+            useEffect(() => { onUpdate({ ...globalData, message: { pitch: elevatorPitch } }); }, [elevatorPitch]);
+
+            const generatePitch = async () => {
+                if(!globalData.name || !globalData.industry) return alert("Bitte Name und Branche im Dashboard definieren.");
+                setIsAiLoading(true);
+                try {
+                    const prompt = `Erstelle einen Elevator Pitch für "${globalData.name}" (${globalData.industry}). Tonalität: ${tone < 50 ? 'Seriös/Traditionell' : 'Modern/Verspielt'}. Max 3 Sätze.`;
+                    const res = await queryGemini(prompt);
+                    setElevatorPitch(res);
+                } catch(e) { alert(e.message); } finally { setIsAiLoading(false); }
+            };
+
+            return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20">
+                        <div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><div className="bg-orange-100 p-2 rounded-lg text-orange-600"><Icons.MessageSquare size={24}/></div><h1 className="text-xl font-bold">Markenbotschaft</h1></div>
+                        <div className="text-sm text-gray-500">{globalData.name}</div>
+                    </header>
+                    <main className="flex-1 p-8 overflow-y-auto">
+                        <div className="max-w-2xl mx-auto space-y-8">
+                            <div className="bg-white p-6 rounded-xl shadow-sm border">
+                                <h3 className="font-bold mb-4 flex items-center gap-2"><Icons.Sliders size={16}/> Tonalität</h3>
+                                <div className="flex items-center gap-4">
+                                    <span className="text-sm font-medium">Seriös</span>
+                                    <input type="range" min="0" max="100" value={tone} onChange={e=>setTone(e.target.value)} className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer" />
+                                    <span className="text-sm font-medium">Verspielt</span>
+                                </div>
+                            </div>
+                            <div className="bg-white p-6 rounded-xl shadow-sm border">
+                                <h3 className="font-bold mb-4">Elevator Pitch</h3>
+                                <div className="bg-gray-50 p-4 rounded-lg min-h-[100px] text-gray-700 italic">
+                                    {isAiLoading ? <Icons.Loader2 className="animate-spin text-orange-500"/> : (elevatorPitch || "Noch kein Pitch generiert...")}
+                                </div>
+                                <button onClick={generatePitch} className="mt-4 w-full bg-orange-600 text-white py-2 rounded font-medium flex justify-center gap-2"><Icons.Sparkles size={16}/> Generieren</button>
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const BrandBook = ({ onBack, data }) => {
+            return (
+                <div className="flex flex-col h-full bg-gray-50">
+                    <header className="bg-white border-b px-6 py-4 flex justify-between items-center shadow-sm z-20 no-print">
+                        <div className="flex items-center gap-4"><button onClick={onBack} className="flex items-center gap-2 px-3 py-2 bg-gray-100 hover:bg-gray-200 rounded-lg"><Icons.ArrowLeft size={18}/><span>Dashboard</span></button><h1 className="text-xl font-bold">Brand Book (Fazit)</h1></div>
+                        <button onClick={() => window.print()} className="bg-gray-900 text-white px-4 py-2 rounded flex gap-2"><Icons.Download size={16}/> PDF Export</button>
+                    </header>
+                    <main className="flex-1 p-8 overflow-y-auto print:p-0 print:overflow-visible">
+                        <div className="max-w-4xl mx-auto bg-white p-12 rounded-xl shadow-lg print:shadow-none print:p-0">
+                            <div className="border-b pb-8 mb-8 text-center">
+                                <h1 className="text-4xl font-bold text-gray-900 mb-2">{data.name || "Unbenannte Marke"}</h1>
+                                <p className="text-gray-500 text-lg">{data.industry || "Branche nicht definiert"}</p>
+                                <p className="text-gray-400 text-sm mt-2">Lead: {data.lead || "-"}</p>
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-12 mb-12 page-break">
+                                <div>
+                                    <h2 className="text-xl font-bold border-b pb-2 mb-4 text-purple-700">1. Brand DNA</h2>
+                                    <div className="space-y-4">
+                                        <div><h4 className="font-bold text-xs uppercase text-gray-400">Kern</h4><p>{data.dna?.placedItems?.filter(i=>i.layer===0).map(i=>i.text).join(', ') || "-"}</p></div>
+                                        <div><h4 className="font-bold text-xs uppercase text-gray-400">Werte</h4><p>{data.dna?.placedItems?.filter(i=>i.layer===1).map(i=>i.text).join(', ') || "-"}</p></div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <h2 className="text-xl font-bold border-b pb-2 mb-4 text-indigo-700">2. Positionierung</h2>
+                                    <p>X: {data.positioning?.labels?.left} - {data.positioning?.labels?.right}</p>
+                                    <p>Y: {data.positioning?.labels?.top} - {data.positioning?.labels?.bottom}</p>
+                                </div>
+                            </div>
+
+                            <div className="mb-12 page-break">
+                                <h2 className="text-xl font-bold border-b pb-2 mb-4 text-orange-700">3. Markenbotschaft</h2>
+                                <div className="bg-gray-50 p-6 rounded-lg border-l-4 border-orange-500">
+                                    <p className="italic text-lg text-gray-800">"{data.message?.pitch || "Kein Pitch definiert"}"</p>
+                                </div>
+                            </div>
+                            
+                            <div className="mb-12 page-break">
+                                <h2 className="text-xl font-bold border-b pb-2 mb-4 text-pink-700">4. Zielgruppen</h2>
+                                {data.target?.personas && data.target.personas.length > 0 ? <MarkdownRenderer content={data.target.personas[0]} /> : <p className="text-gray-400">Keine Personas definiert.</p>}
+                            </div>
+                            
+                            <div className="mb-12 page-break">
+                                <h2 className="text-xl font-bold border-b pb-2 mb-4 text-blue-700">5. Business Modell</h2>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div><h4 className="font-bold text-xs uppercase text-gray-400">Problem</h4><p>{data.business?.problem || "-"}</p></div>
+                                    <div><h4 className="font-bold text-xs uppercase text-gray-400">Lösung</h4><p>{data.business?.solution || "-"}</p></div>
+                                    <div><h4 className="font-bold text-xs uppercase text-gray-400">USP</h4><p>{data.business?.usp || "-"}</p></div>
+                                    <div><h4 className="font-bold text-xs uppercase text-gray-400">Revenue</h4><p>{data.business?.revenue || "-"}</p></div>
+                                </div>
+                            </div>
+
+                            <div className="text-center text-xs text-gray-400 mt-12 pt-8 border-t">
+                                Erstellt mit Brand Builder OS 3.0
+                            </div>
+                        </div>
+                    </main>
+                </div>
+            );
+        };
+
+        const ProjectListScreen = ({ projects, onSelect, onDelete, onNew }) => (
+            <div className="min-h-screen bg-gray-50 p-8">
+                <header className="max-w-6xl mx-auto mb-8 flex justify-between items-center">
+                    <div>
+                        <h1 className="text-3xl font-bold text-gray-900">Brand Builder OS <span className="text-emerald-600">3.0</span></h1>
+                        <p className="text-gray-500">Multi-Projekt Workspace</p>
+                    </div>
+                    <button onClick={onNew} className="bg-emerald-600 text-white px-6 py-3 rounded-xl shadow-lg hover:bg-emerald-700 flex items-center gap-2 font-bold transition-transform hover:scale-105">
+                        <Icons.Plus size={20}/> Neues Projekt
+                    </button>
+                </header>
+                
+                <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {Object.values(projects).map(p => (
+                        <div key={p.id} className="bg-white rounded-xl shadow-sm border border-gray-200 p-6 hover:shadow-md transition-shadow cursor-pointer relative group" onClick={() => onSelect(p.id)}>
+                            <div className="flex justify-between items-start mb-4">
+                                <div className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center text-white font-bold text-xl">{p.name.charAt(0)}</div>
+                                <button onClick={(e) => { e.stopPropagation(); onDelete(p.id); }} className="text-gray-300 hover:text-red-500 p-2"><Icons.Trash2 size={16}/></button>
+                            </div>
+                            <h3 className="text-lg font-bold text-gray-900 mb-1">{p.name}</h3>
+                            <p className="text-sm text-gray-500 mb-4">{p.industry}</p>
+                            <div className="flex items-center gap-4 text-xs text-gray-400">
+                                <div className="flex items-center gap-1"><Icons.Users size={12}/> {p.lead}</div>
+                                <div className="flex items-center gap-1"><Icons.Calendar size={12}/> {p.date}</div>
+                            </div>
+                            <div className="absolute top-4 right-12 bg-gray-100 text-gray-500 text-[10px] px-2 py-0.5 rounded-full font-mono">{p.code}</div>
+                        </div>
+                    ))}
+                    {Object.keys(projects).length === 0 && (
+                        <div className="col-span-full text-center py-20 text-gray-400">
+                            <div className="mb-4 opacity-20"><Icons.FolderOpen size={64} className="mx-auto"/></div>
+                            <p>Noch keine Projekte. Starte jetzt!</p>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+
+        const OnboardingScreen = ({ onFinish, onCancel }) => {
+            const [formData, setFormData] = useState({ name: '', industry: '', lead: '', code: '', date: new Date().toISOString().slice(0, 10) });
+
+            const handleSubmit = (e) => {
+                e.preventDefault();
+                if(!formData.name || !formData.industry) return alert("Name und Branche sind Pflichtfelder.");
+                onFinish({ ...formData, id: `proj-${Date.now()}` });
+            };
+
+            return (
+                <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+                    <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-8">
+                        <div className="text-center mb-8">
+                            <div className="w-16 h-16 bg-emerald-100 text-emerald-600 rounded-full flex items-center justify-center mx-auto mb-4"><Icons.Plus size={32}/></div>
+                            <h2 className="text-2xl font-bold text-gray-900">Neues Projekt starten</h2>
+                            <p className="text-gray-500 text-sm">Definiere die Eckdaten für das Branding.</p>
+                        </div>
+                        <form onSubmit={handleSubmit} className="space-y-4">
+                            <div className="grid grid-cols-2 gap-4">
+                                <div><label className="text-xs font-bold text-gray-700 block mb-1">Projekt Name*</label><input required className="w-full border rounded-lg p-3 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all" value={formData.name} onChange={e=>setFormData({...formData, name: e.target.value})} placeholder="z.B. Alpha Corp" /></div>
+                                <div><label className="text-xs font-bold text-gray-700 block mb-1">Projekt Code</label><input className="w-full border rounded-lg p-3 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all" value={formData.code} onChange={e=>setFormData({...formData, code: e.target.value})} placeholder="z.B. P-2024-01" /></div>
+                            </div>
+                            <div><label className="text-xs font-bold text-gray-700 block mb-1">Branche*</label><input required className="w-full border rounded-lg p-3 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all" value={formData.industry} onChange={e=>setFormData({...formData, industry: e.target.value})} placeholder="z.B. FinTech, Gastronomie..." /></div>
+                            <div><label className="text-xs font-bold text-gray-700 block mb-1">Projekt Lead / Team</label><input className="w-full border rounded-lg p-3 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all" value={formData.lead} onChange={e=>setFormData({...formData, lead: e.target.value})} placeholder="Namen der Beteiligten" /></div>
+                            <div><label className="text-xs font-bold text-gray-700 block mb-1">Startdatum</label><input type="date" className="w-full border rounded-lg p-3 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none transition-all" value={formData.date} onChange={e=>setFormData({...formData, date: e.target.value})} /></div>
+                            
+                            <div className="pt-6 flex gap-4">
+                                <button type="button" onClick={onCancel} className="flex-1 py-3 text-gray-500 hover:bg-gray-100 rounded-lg font-medium">Abbrechen</button>
+                                <button type="submit" className="flex-1 py-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg font-bold shadow-lg shadow-emerald-200">Projekt erstellen</button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+            );
+        };
+
+        // --- MAIN APP (PROJECT MANAGER) ---
+        const App = () => {
+          const [view, setView] = useState('list'); // 'list', 'onboarding', 'workspace'
+          const [projects, setProjects] = useState(() => {
+              const saved = localStorage.getItem('brandBuilder_projects');
+              return saved ? JSON.parse(saved) : {};
+          });
+          const [activeProjectId, setActiveProjectId] = useState(null);
+          
+          // Workspace State (lifts up from previous App component)
+          const [currentTool, setCurrentTool] = useState('dashboard');
+
+          useEffect(() => {
+              localStorage.setItem('brandBuilder_projects', JSON.stringify(projects));
+          }, [projects]);
+
+          const handleCreateProject = (metaData) => {
+              const newProject = {
+                  ...metaData,
+                  progress: { business: 0, dna: 0, positioning: 0, structure: 0 },
+                  // Empty data containers for modules
+                  dna: { pool: [{ id: 'w1', text: 'Innovation', layer: 0 }, { id: 'w2', text: 'Nachhaltigkeit', layer: 1 }, { id: 'w3', text: 'Qualität', layer: 2 }], placedItems: [] },
+                  positioning: { labels: { top: 'Premium', bottom: 'Budget', left: 'Tradition', right: 'Innovation' }, logos: [], arrows: [] },
+                  structure: { root: { id: 'root', name: metaData.name, type: 'master', isOpen: true, children: [] } },
+                  business: {},
+                  target: {},
+                  message: {}
+              };
+              setProjects(prev => ({ ...prev, [newProject.id]: newProject }));
+              setActiveProjectId(newProject.id);
+              setView('workspace');
+          };
+
+          const handleDeleteProject = (id) => {
+              if (confirm("Projekt wirklich löschen?")) {
+                  const newProjects = { ...projects };
+                  delete newProjects[id];
+                  setProjects(newProjects);
+              }
+          };
+
+          const handleUpdateActiveProject = (updatedData) => {
+              setProjects(prev => ({
+                  ...prev,
+                  [activeProjectId]: { ...prev[activeProjectId], ...updatedData }
+              }));
+          };
+
+          // --- RENDER ---
+          if (view === 'list') {
+              return <ProjectListScreen projects={projects} onNew={() => setView('onboarding')} onSelect={(id) => { setActiveProjectId(id); setView('workspace'); setCurrentTool('dashboard'); }} onDelete={handleDeleteProject} />;
+          }
+
+          if (view === 'onboarding') {
+              return <OnboardingScreen onFinish={handleCreateProject} onCancel={() => setView('list')} />;
+          }
+
+          if (view === 'workspace' && activeProjectId && projects[activeProjectId]) {
+              const activeProject = projects[activeProjectId];
+              
+              // Workspace Router
+              return (
+                <div className="h-screen w-full bg-gray-50 font-sans text-gray-800">
+                  {currentTool === 'dashboard' && <Dashboard onNavigate={setCurrentTool} projectData={activeProject} />}
+                  {currentTool === 'business' && <BusinessModelTool onBack={() => setCurrentTool('dashboard')} globalData={activeProject} onUpdate={handleUpdateActiveProject} />}
+                  {currentTool === 'positioning' && <PositioningTool onBack={() => setCurrentTool('dashboard')} globalData={activeProject} onUpdate={handleUpdateActiveProject} />}
+                  {currentTool === 'dna' && <BrandDNATool onBack={() => setCurrentTool('dashboard')} globalData={activeProject} onUpdate={handleUpdateActiveProject} />}
+                  {currentTool === 'structure' && <BrandStructureTool onBack={() => setCurrentTool('dashboard')} globalData={activeProject} onUpdate={handleUpdateActiveProject} />}
+                  {currentTool === 'target' && <TargetAudienceTool onBack={() => setCurrentTool('dashboard')} globalData={activeProject} onUpdate={handleUpdateActiveProject} />}
+                  {currentTool === 'naming' && <NamingTool onBack={() => setCurrentTool('dashboard')} />}
+                  {currentTool === 'message' && <MessagingTool onBack={() => setCurrentTool('dashboard')} globalData={activeProject} onUpdate={handleUpdateActiveProject} />}
+                  {currentTool === 'brandbook' && <BrandBook onBack={() => setCurrentTool('dashboard')} data={activeProject} />}
+                  
+                  {/* Global Back to Projects Link (optional, maybe in header) */}
+                  <div className="fixed bottom-4 left-4 z-50 no-print">
+                      <button onClick={() => setView('list')} className="bg-slate-800 text-white p-2 rounded-full shadow-lg hover:bg-slate-900" title="Zurück zur Projektübersicht"><Icons.FolderOpen size={16}/></button>
+                  </div>
+                </div>
+              );
+          }
+
+          return <div>Error: Project state invalid. <button onClick={() => setView('list')}>Reset</button></div>;
+        };
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
